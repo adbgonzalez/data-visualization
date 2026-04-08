@@ -5,7 +5,7 @@
 Nesta práctica imos construír un pipeline completo de datos:
 
 ```text
-produtor Python -> ficheiro de logs -> Data Prepper -> OpenSearch -> OpenSearch Dashboards
+produtor Python -> HTTP -> Data Prepper -> OpenSearch -> OpenSearch Dashboards
 ```
 
 O escenario é `ecommerce_events`, pensado para aplicar o aprendido no laboratorio guiado nun contexto máis analítico e próximo a operacións de comercio electrónico.
@@ -16,8 +16,8 @@ O escenario é `ecommerce_events`, pensado para aplicar o aprendido no laborator
 
 Ao rematar a práctica deberías ter:
 
-- un produtor en Python que xere eventos simulados de comercio electrónico e os engada periodicamente a un ficheiro de log
-- un pipeline de Data Prepper que lea ese ficheiro, extraia os campos e os envíe a OpenSearch
+- un produtor en Python que xere eventos simulados de comercio electrónico e os envíe periodicamente por HTTP a Data Prepper
+- un pipeline de Data Prepper que reciba eses eventos, extraia os campos e os envíe a OpenSearch
 - un índice `ecommerce_events` con documentos xa estruturados
 - un dashboard con visualizacións orientadas á análise do proceso de compra
 
@@ -46,19 +46,29 @@ Neste escenario imos tratar:
 
 ---
 
-## 4. Formato do log de entrada
+## 4. Formato do evento de entrada
 
-O produtor escribe eventos desestruturados ou semi-estruturados nun único ficheiro, por exemplo `ecommerce_events.log`. Nun contorno con Docker, ese ficheiro pode estar montado nunha ruta compartida como `/shared/ecommerce_events.log`.
+O produtor xera unha liña de texto desestruturada ou semi-estruturada e envíaa por HTTP a Data Prepper dentro dun obxecto JSON.
 
-Cada evento ocupará unha liña e terá un formato como este:
+O contido textual do evento terá un formato como este:
 
 ```text
 2026-03-27T11:10:25Z service=checkout level=INFO latency_ms=184.42 status=201 user=user_12 event_type=purchase product_id=SKU-1042 category=electronics price=249.90
 ```
 
+O produtor enviará esa liña dentro dun `payload` JSON coma este:
+
+```json
+[
+  {
+    "message": "2026-03-27T11:10:25Z service=checkout level=INFO latency_ms=184.42 status=201 user=user_12 event_type=purchase product_id=SKU-1042 category=electronics price=249.90"
+  }
+]
+```
+
 Este formato permite:
 
-- ver o log “en cru” con facilidade
+- ver o evento “en cru” con facilidade
 - transformar despois os datos con `grok` en Data Prepper
 - xerar un índice máis rico para análise funcional e técnica
 
@@ -66,15 +76,18 @@ Este formato permite:
 
 ## 5. Produtor de eventos
 
-O seguinte script Python engade unha liña nova ao ficheiro en cada iteración. O `timestamp` é sempre o momento actual da xeración do evento:
+Neste exemplo úsase o porto `2025` para evitar colisións co laboratorio guiado ou con outros servizos HTTP do contorno. Antes de lanzar a práctica, comproba que ese porto non estea xa en uso. Se no teu contorno está ocupado, podes escoller outro, pero lembra que o cambio debe facerse tanto no produtor como no pipeline.
+
+O seguinte script Python xera unha liña nova en cada iteración e envíaa por HTTP a Data Prepper. O `timestamp` é sempre o momento actual da xeración do evento:
 
 ```python
 #!/usr/bin/env python3
 import time
 import random
+import requests
 from datetime import datetime, timezone
 
-LOG_FILE = "/shared/ecommerce_events.log"
+DATA_PREPPER_URL = "http://data-prepper:2025/ecommerce-events-pipeline/logs"
 POLL_SECONDS = 2
 
 SERVICES = ["frontend", "catalog", "cart", "checkout", "payments"]
@@ -112,7 +125,7 @@ def choose_price(event_type):
     return round(random.uniform(5, 300), 2)
 
 
-print(f"[ecommerce_events] escribindo en {LOG_FILE}")
+print(f"[ecommerce_events] enviando a {DATA_PREPPER_URL}")
 
 while True:
     event_type = random.choice(EVENT_TYPES)
@@ -152,10 +165,11 @@ while True:
         f"price={price}"
     )
 
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
+    payload = [{"message": line}]
+    response = requests.post(DATA_PREPPER_URL, json=payload, timeout=5)
+    response.raise_for_status()
 
-    print("[ecommerce_events] engadido:", line)
+    print("[ecommerce_events] enviado:", line)
     time.sleep(POLL_SECONDS)
 ```
 
@@ -167,10 +181,10 @@ python .\producer_ecommerce_events.py
 
 Importante:
 
-- o produtor fai `append`, non sobreescribe o ficheiro
-- se o ficheiro non existe, créase automaticamente
-- se queres empezar a práctica desde cero, podes borrar ou baleirar `ecommerce_events.log` antes de lanzar o produtor
-- se Data Prepper arrinca antes de que o ficheiro exista, pode fallar, así que convén crear primeiro o ficheiro ou lanzar antes o produtor
+- o produtor envía cada evento cun `POST` HTTP a Data Prepper
+- o `payload` vai en formato JSON e o campo que contén o texto bruto é `message`
+- a URL configurada en `DATA_PREPPER_URL` debe coincidir co porto e coa ruta configurados no pipeline
+- se Data Prepper non está escoitando nesa URL, o produtor fallará ao enviar o evento
 
 ---
 
@@ -181,10 +195,11 @@ O pipeline de Data Prepper pode ser este:
 ```yaml
 ecommerce-events-pipeline:
   source:
-    file:
-      path: "/shared/ecommerce_events.log"
-      record_type: event
-      format: plain
+    http:
+      port: 2025
+      path: "/ecommerce-events-pipeline/logs"
+      health_check_service: true
+      unauthenticated_health_check: true
   processor:
     - grok:
         match:
@@ -213,17 +228,18 @@ ecommerce-events-pipeline:
 
 O pipeline debe facer estes pasos:
 
-1. Ler as liñas novas do ficheiro `ecommerce_events.log`, que neste exemplo está montado como `/shared/ecommerce_events.log`.
-2. Extraer os campos do texto cun patrón `grok`.
+1. Recibir os eventos por HTTP na ruta `/ecommerce-events-pipeline/logs`.
+2. Extraer os campos do texto almacenado en `message` cun patrón `grok`.
 3. Converter os tipos numéricos ao formato axeitado.
 4. Inserir os documentos resultantes no índice `ecommerce_events` de OpenSearch.
 
 Importante:
 
-- Data Prepper debe poder acceder ao mesmo ficheiro que vai escribindo o produtor
-- a ruta configurada en `path` debe ser válida dentro do contedor ou instalación de Data Prepper
-- se cambias o nome ou localización do ficheiro, terás que actualizar tamén a propiedade `path`
-- no exemplo actual, tanto o produtor como Data Prepper usan a ruta compartida `/shared/ecommerce_events.log`
+- Data Prepper debe estar escoitando no porto configurado, neste exemplo `2025`
+- a ruta configurada en `path` debe coincidir exactamente coa URL usada polo produtor
+- se cambias o porto ou a ruta HTTP, terás que actualizar tamén `DATA_PREPPER_URL` no produtor
+- antes de lanzar a práctica, comproba que o porto elixido non estea xa ocupado por outro servizo
+- no exemplo actual, o produtor envía os eventos a `http://data-prepper:2025/ecommerce-events-pipeline/logs`
 
 ---
 

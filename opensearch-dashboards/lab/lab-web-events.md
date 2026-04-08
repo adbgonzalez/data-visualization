@@ -5,10 +5,10 @@
 Neste laboratorio imos construír un pipeline completo de datos:
 
 ```text
-produtor Python -> ficheiro de logs -> Data Prepper -> OpenSearch -> OpenSearch Dashboards
+produtor Python -> HTTP -> Data Prepper -> OpenSearch -> OpenSearch Dashboards
 ```
 
-O escenario é `web_events`, pensado como práctica guiada para aprender o fluxo completo e, en particular, o papel de Data Prepper na transformación de logs desestruturados en documentos JSON.
+O escenario é `web_events`, pensado como práctica guiada para aprender o fluxo completo e, en particular, o papel de Data Prepper na transformación de eventos textuais en documentos JSON.
 
 ---
 
@@ -16,8 +16,8 @@ O escenario é `web_events`, pensado como práctica guiada para aprender o fluxo
 
 Ao rematar o laboratorio deberías ter:
 
-- un produtor en Python que xere eventos simulados e os engada periodicamente a un ficheiro de log
-- un pipeline de Data Prepper que lea ese ficheiro, extraia os campos e os envíe a OpenSearch
+- un produtor en Python que xere eventos simulados e os envíe periodicamente por HTTP a Data Prepper
+- un pipeline de Data Prepper que reciba eses eventos, extraia os campos e os envíe a OpenSearch
 - un índice `web_events` con documentos xa estruturados
 - un dashboard básico con varias visualizacións sobre ese índice
 
@@ -46,35 +46,48 @@ Neste laboratorio imos tratar:
 
 ---
 
-## 4. Formato do log de entrada
+## 4. Formato do evento de entrada
 
-O produtor escribe eventos desestruturados ou semi-estruturados nun único ficheiro, por exemplo `web_events.log`. Nun contorno con Docker, ese ficheiro pode estar montado nunha ruta compartida como `/shared/web_events.log`.
+O produtor xera unha liña de texto desestruturada ou semi-estruturada e envíaa por HTTP a Data Prepper dentro dun obxecto JSON.
 
-Cada evento ocupará unha liña e terá un formato como este:
+O contido textual do evento terá un formato como este:
 
 ```text
 2026-03-27T10:15:23Z servizo=web client_ip=10.0.0.10 method=GET endpoint=/login status=200 latency_ms=124.52 bytes_out=2048 user_agent="Mozilla/5.0" mensaxe="GET /login -> 200 (124.52 ms)"
 ```
 
+O produtor enviará esa liña dentro dun `payload` JSON coma este:
+
+```json
+[
+  {
+    "message": "2026-03-27T10:15:23Z servizo=web client_ip=10.0.0.10 method=GET endpoint=/login status=200 latency_ms=124.52 bytes_out=2048 user_agent=\"Mozilla/5.0\" mensaxe=\"GET /login -> 200 (124.52 ms)\""
+  }
+]
+```
+
 Este formato é útil porque:
 
 - segue sendo lexible a simple vista
-- permite ver claramente o log “en cru”
+- permite manter o evento “en cru” nun campo `message`
 - é relativamente doado de parsear con `grok` en Data Prepper
 
 ---
 
 ## 5. Produtor de eventos
 
-O seguinte script Python engade unha liña nova ao ficheiro en cada iteración. O `timestamp` é sempre o momento actual da xeración do evento:
+Neste exemplo úsase o porto `2024` para evitar colisións con outros pipelines ou servizos HTTP do contorno. Antes de lanzar o laboratorio, comproba que ese porto non estea xa en uso. Se no teu contorno está ocupado, podes escoller outro, pero lembra que o cambio debe facerse tanto no produtor como no pipeline.
+
+O seguinte script Python xera unha liña nova en cada iteración e envíaa por HTTP a Data Prepper. O `timestamp` é sempre o momento actual da xeración do evento:
 
 ```python
 #!/usr/bin/env python3
 import time
 import random
+import requests
 from datetime import datetime, timezone
 
-LOG_FILE = "/shared/web_events.log"
+DATA_PREPPER_URL = "http://data-prepper:2024/web-events-pipeline/logs"
 
 POLL_SECONDS = 2
 
@@ -102,7 +115,7 @@ def now_utc_iso():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-print(f"[web_events] escribindo en {LOG_FILE}")
+print(f"[web_events] enviando a {DATA_PREPPER_URL}")
 
 while True:
     servizo = random.choice(SERVICES)
@@ -128,10 +141,11 @@ while True:
         f'mensaxe="{mensaxe}"'
     )
 
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
+    payload = [{"message": line}]
+    response = requests.post(DATA_PREPPER_URL, json=payload, timeout=5)
+    response.raise_for_status()
 
-    print("[web_events] engadido:", line)
+    print("[web_events] enviado:", line)
     time.sleep(POLL_SECONDS)
 ```
 
@@ -143,10 +157,10 @@ python .\producer_web_events.py
 
 Importante:
 
-- o produtor fai `append`, non sobreescribe o ficheiro
-- se o ficheiro non existe, créase automaticamente
-- se queres empezar unha práctica desde cero, podes borrar ou baleirar `web_events.log` antes de lanzar o produtor
-- se Data Prepper arrinca antes de que o ficheiro exista, pode fallar, así que convén crear primeiro o ficheiro ou lanzar antes o produtor
+- o produtor envía cada evento cun `POST` HTTP a Data Prepper
+- o `payload` vai en formato JSON e o campo que contén o texto bruto é `message`
+- a URL configurada en `DATA_PREPPER_URL` debe coincidir co porto e coa ruta configurados no pipeline
+- se Data Prepper non está escoitando nesa URL, o produtor fallará ao enviar o evento
 
 ---
 
@@ -157,10 +171,11 @@ O pipeline de Data Prepper pode ser este:
 ```yaml
 web-events-pipeline:
   source:
-    file:
-      path: "/shared/web_events.log"
-      record_type: event
-      format: plain
+    http:
+      port: 2024
+      path: "/web-events-pipeline/logs"
+      health_check_service: true
+      unauthenticated_health_check: true
   processor:
     - grok:
         match:
@@ -188,17 +203,18 @@ web-events-pipeline:
 
 O pipeline debe facer estes pasos:
 
-1. Ler as liñas novas do ficheiro `web_events.log`, que neste exemplo está montado como `/shared/web_events.log`.
-2. Extraer os campos do texto cun patrón `grok`.
+1. Recibir os eventos por HTTP na ruta `/web-events-pipeline/logs`.
+2. Extraer os campos do texto almacenado en `message` cun patrón `grok`.
 3. Converter os tipos numéricos ao formato axeitado.
 4. Inserir os documentos resultantes no índice `web_events` de OpenSearch.
 
 Importante:
 
-- Data Prepper debe poder acceder ao mesmo ficheiro que vai escribindo o produtor
-- a ruta configurada en `path` debe ser válida dentro do contedor ou instalación de Data Prepper
-- se cambias o nome ou localización do ficheiro, terás que actualizar tamén a propiedade `path`
-- no exemplo actual, tanto o produtor como Data Prepper usan a ruta compartida `/shared/web_events.log`
+- Data Prepper debe estar escoitando no porto configurado, neste exemplo `2024`
+- a ruta configurada en `path` debe coincidir exactamente coa URL usada polo produtor
+- se cambias o porto ou a ruta HTTP, terás que actualizar tamén `DATA_PREPPER_URL` no produtor
+- antes de lanzar o laboratorio, comproba que o porto elixido non estea xa ocupado por outro servizo
+- no exemplo actual, o produtor envía os eventos a `http://data-prepper:2024/web-events-pipeline/logs`
 
 ---
 
