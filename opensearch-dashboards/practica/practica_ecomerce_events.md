@@ -349,43 +349,74 @@ A práctica avaliarase sobre 10 puntos.
 
 ### 10.4. Visualizacións e filtros
 
-Estes 8 puntos repartiranse equitativamente entre 8 elementos.
+Estes 8 puntos repartiranse entre 8 elementos obrigatorios do dashboard.
 
 | Elemento | Puntuación máxima |
 | --- | ---: |
 | KPI de total de eventos | 1 punto |
 | KPI de compras completadas | 1 punto |
-| KPI de pagos fallidos ou importe total | 1 punto |
+| KPI de pagos fallidos | 1 punto |
+| KPI de importe total | 1 punto |
 | Gráfica temporal | 1 punto |
 | Gráfica por categoría | 1 punto |
-| Gráfica por tipo de evento | 1 punto |
-| `Data Table` | 1 punto |
-| Filtros do dashboard | 1 punto |
+| Gráfica por tipo de evento ou servizo | 1 punto |
+| Filtros e táboa | 1 punto |
 
-### 10.5. Guía de corrección para cada visualización
+### 10.5. Guía de corrección para cada visualización e KPI
 
-En cada visualización avaliaranse estes aspectos:
+En cada KPI e en cada visualización avaliaranse estes aspectos:
 
 - corrección técnica
-- presenza de lendas, etiquetas ou títulos claros
-- aspecto visual e lexibilidade
+- relación co obxectivo da práctica
+- presenza de títulos, etiquetas ou configuración clara cando corresponda
+- lexibilidade e presentación visual
 
 | Nivel | Puntuación | Criterio |
 | --- | ---: | --- |
-| Completo | 1 punto | Visualización correcta, ben etiquetada e cun aspecto visual coidado. |
-| Parcial | 0,5 puntos | Visualización funcional, pero con erros menores de configuración, etiquetas pobres ou presentación mellorable. |
-| Insuficiente | 0 puntos | Visualización incorrecta, pouco interpretable ou ausente. |
+| Completo | 1 punto | O KPI ou a visualización está ben configurado, representa correctamente a información e resulta claro para a análise. |
+| Parcial | 0,5 puntos | O KPI ou a visualización é funcional, pero presenta algún problema menor de configuración, claridade ou interpretación. |
+| Insuficiente | 0 puntos | O KPI ou a visualización é incorrecto, non achega información útil ou está ausente. |
 
-### 10.6. Guía de corrección para os filtros
+### 10.6. Guía de corrección para filtros e táboa
 
-No bloque de filtros valorarase:
+No bloque de filtros e táboa valorarase:
 
-- que existan filtros útiles para explorar os datos
-- que estean ben escollidos en función do escenario
-- que melloren a análise do dashboard
+- que a táboa resuma información relevante do escenario
+- que os filtros sexan útiles para explorar os datos
+- que filtros e táboa estean ben configurados e sexan coherentes co dashboard
+- que este bloque mellore realmente a análise
 
 | Nivel | Puntuación | Criterio |
 | --- | ---: | --- |
-| Completo | 1 punto | Filtros presentes, útiles e ben configurados. |
-| Parcial | 0,5 puntos | Filtros presentes pero pouco claros, incompletos ou pouco relevantes. |
-| Insuficiente | 0 puntos | Non hai filtros ou non funcionan correctamente. |
+| Completo | 1 punto | A táboa e os filtros están presentes, son útiles, están ben configurados e facilitan a exploración do dashboard. |
+| Parcial | 0,5 puntos | A táboa e/ou os filtros están presentes, pero son incompletos, pouco claros ou pouco relevantes para a análise. |
+| Insuficiente | 0 puntos | Non hai táboa e filtros, non funcionan correctamente ou non achegan valor á análise. |
+
+---
+
+## 11. Entrega
+
+A entrega da práctica debe incluír estes tres elementos:
+
+- un documento en PDF coas capturas necesarias para demostrar o funcionamento da práctica
+- o ficheiro de exportación do dashboard en formato `ndjson`
+- o PDF exportado do dashboard final
+
+No documento en PDF coas capturas deberá verse, como mínimo:
+
+- o script produtor en execución, xerando e enviando eventos
+- a existencia do índice `ecommerce_events`
+- a presenza de documentos indexados no índice `ecommerce_events`
+
+O ficheiro `ndjson` deberá corresponder ao dashboard final entregado e incluír os obxectos necesarios para a súa revisión.
+
+Para obter o ficheiro `ndjson`, entra en OpenSearch Dashboards e accede á ruta:
+`Dashboards Management` -> `Saved Objects`.
+
+Unha vez aí:
+
+- selecciona o dashboard da práctica
+- escolle a opción de exportación
+- descarga o ficheiro xerado en formato `ndjson` e incorpórao á entrega
+
+O PDF exportado do dashboard debe corresponder ao mesmo dashboard incluído no ficheiro `ndjson`.
